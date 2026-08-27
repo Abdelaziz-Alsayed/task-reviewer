@@ -1,0 +1,154 @@
+assignment:
+  id: week05_regression
+  name: Week 05 - Regression
+  total_marks: 25
+  description: Regression assignment with cross-validation and a substantial RandomizedSearchCV search.
+
+criteria:
+  - id: data_understanding
+    name: Data Understanding
+    max_score: 3
+    checks:
+      - id: dataset_load
+        description: Loads a dataset using a recognizable data-loading operation.
+        points: 0.5
+        checks: [data_loading]
+      - id: dataset_exploration
+        description: Explores the dataset using head/info/describe/shape or equivalent.
+        points: 0.5
+        checks: [dataset_exploration]
+      - id: target_identification
+        description: Identifies a target variable.
+        points: 0.5
+        checks: [target_identification]
+      - id: xy_split
+        description: Separates features and target.
+        points: 0.5
+        checks: [xy_split]
+      - id: target_analysis
+        description: Performs basic target analysis.
+        points: 1.0
+        checks: [target_analysis]
+
+  - id: data_preparation
+    name: Data Preparation
+    max_score: 3
+    checks:
+      - id: missing_values
+        description: Handles missing values appropriately.
+        points: 1
+        checks: [missing_values]
+      - id: categorical_handling
+        description: Handles categorical variables.
+        points: 1
+        checks: [categorical_handling]
+      - id: no_leakage
+        description: Avoids likely preprocessing leakage.
+        points: 1
+        checks: [no_preprocessing_leakage]
+
+  - id: regression_models
+    name: Regression Models
+    max_score: 4
+    checks:
+      - id: baseline
+        description: Establishes a baseline model or baseline prediction.
+        points: 1
+        checks: [baseline]
+      - id: linear_regression
+        description: Uses Linear Regression or an equivalent linear regressor.
+        points: 1
+        checks: [linear_regression]
+      - id: flexible_model
+        description: Uses a more flexible regression model.
+        points: 1
+        checks: [flexible_regression]
+      - id: train_predict
+        description: Demonstrates a recognizable fit/predict workflow.
+        points: 1
+        checks: [train_predict]
+
+  - id: evaluation
+    name: Evaluation
+    max_score: 4
+    checks:
+      - id: mae
+        description: Calculates MAE.
+        points: 1
+        checks: [mae]
+      - id: rmse
+        description: Calculates RMSE.
+        points: 1
+        checks: [rmse]
+      - id: r2
+        description: Calculates R².
+        points: 1
+        checks: [r2]
+      - id: interpretation
+        description: Interprets or compares evaluation results.
+        points: 1
+        checks: [metric_interpretation]
+
+  - id: cross_validation
+    name: Cross-Validation
+    max_score: 3
+    checks:
+      - id: kfold
+        description: Uses K-Fold cross-validation or an equivalent CV strategy.
+        points: 1
+        checks: [cross_validation]
+      - id: mean_cv
+        description: Reports mean CV performance.
+        points: 1
+        checks: [cv_mean]
+      - id: cv_std
+        description: Reports CV variability/standard deviation.
+        points: 1
+        checks: [cv_std]
+
+  - id: randomized_search
+    name: RandomizedSearchCV
+    max_score: 4
+    checks:
+      - id: uses_randomized_search
+        description: Uses RandomizedSearchCV correctly.
+        points: 1
+        checks: [randomized_search]
+      - id: broad_search_space
+        description: Defines a sufficiently broad search space.
+        points: 1
+        checks: [large_search_space]
+      - id: search_cv
+        description: Uses CV during randomized search.
+        points: 1
+        checks: [randomized_search_cv]
+      - id: best_params
+        description: Reports/interprets best parameters.
+        points: 1
+        checks: [best_params]
+
+  - id: visualization
+    name: Visualization
+    max_score: 2
+    checks:
+      - id: actual_predicted
+        description: Includes actual-vs-predicted visualization.
+        points: 1
+        checks: [actual_vs_predicted]
+      - id: residuals
+        description: Includes residual visualization.
+        points: 1
+        checks: [residual_visualization]
+
+  - id: final_analysis
+    name: Final Analysis
+    max_score: 2
+    checks:
+      - id: compare_models
+        description: Compares models.
+        points: 1
+        checks: [model_comparison]
+      - id: justify_model
+        description: Justifies final model selection.
+        points: 1
+        checks: [model_justification]
