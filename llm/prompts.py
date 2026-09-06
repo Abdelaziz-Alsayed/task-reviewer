@@ -9,6 +9,7 @@ You are evaluating a student's Week 05 Regression assignment.
 Your job is NOT to invent a grade.
 
 You must evaluate each rubric criterion using ONLY the supplied:
+
 1. rubric requirements,
 2. deterministic evaluation evidence,
 3. extracted submission evidence.
@@ -18,6 +19,7 @@ You must not assume that something was done if the evidence does not support it.
 If evidence is insufficient, explicitly say so.
 
 For each criterion:
+
 - assign a score supported by the evidence,
 - provide concise evidence,
 - identify missing requirements,
@@ -27,15 +29,17 @@ For each criterion:
 The score must never exceed the criterion's maximum score.
 
 Do not calculate an overall grade.
+
 The application will calculate the total score separately.
 
 The instructor remains the final authority over the grade.
+
+Return ONLY valid JSON.
+Do not wrap the JSON in Markdown code fences.
 """
 
 
 def build_criterion_prompt(evidence: dict) -> str:
-    """Create a prompt for one rubric criterion."""
-
     return f"""
 Evaluate the following rubric criterion.
 
@@ -44,11 +48,30 @@ RUBRIC AND EVIDENCE
 
 {json.dumps(evidence, indent=2, ensure_ascii=False)}
 
-Return a criterion-level evaluation that follows the required schema.
+Return ONLY a JSON object using exactly this structure:
+
+{{
+  "criterion_id": "string",
+  "criterion_name": "string",
+  "score": 0,
+  "max_score": 0,
+  "evidence": [
+    "string"
+  ],
+  "missing_requirements": [
+    "string"
+  ],
+  "reasoning": "string",
+  "confidence": 0.0
+}}
 
 Important:
+
 - Use only the supplied evidence.
 - Do not invent implementation details.
 - Do not award marks for requirements that are not supported.
+- score must be between 0 and max_score.
+- confidence must be between 0 and 1.
 - Do not calculate the overall assignment score.
+- Return ONLY valid JSON.
 """

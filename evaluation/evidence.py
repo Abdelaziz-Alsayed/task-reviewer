@@ -64,18 +64,17 @@ def build_evidence_package(
     assignment: dict[str, Any],
     rubric: list[dict[str, Any]],
     extracted_content: dict[str, Any],
-    deterministic_results: dict[str, CheckResult]
-    | list[CheckResult],
+    deterministic_results: dict[str, CheckResult] | list[CheckResult],
 ) -> dict[str, Any]:
-    """
-    Build the complete internal evidence package.
+    normalized_results = normalize_check_results(
+        deterministic_results
+    )
 
-    This package contains all available evidence.
-
-    Individual LLM requests should normally use
-    build_criterion_evidence() instead of sending this
-    entire package.
-    """
+    criterion_evidence = build_all_criterion_evidence(
+        rubric=rubric,
+        deterministic_results=deterministic_results,
+        extracted_content=extracted_content,
+    )
 
     return {
         "student": {
@@ -83,10 +82,8 @@ def build_evidence_package(
         },
         "assignment": assignment,
         "rubric": rubric,
-        "deterministic_results": normalize_check_results(
-            deterministic_results
-        ),
-        "extracted_content": extracted_content,
+        "deterministic_results": normalized_results,
+        "criterion_evidence": criterion_evidence,
     }
 
 

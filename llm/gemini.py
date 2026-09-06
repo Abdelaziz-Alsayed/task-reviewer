@@ -1,0 +1,101 @@
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from google import genai
+
+from config.llm_settings import GEMINI_API_KEY, GEMINI_MODEL
+from llm.base import LLMEvaluator
+from llm.prompts import SYSTEM_PROMPT, build_criterion_prompt
+from llm.schemas import CriterionEvaluation, LLMEvaluation
+
+
+class GeminiEvaluator(LLMEvaluator):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+    ) -> None:
+        self.api_key = api_key or GEMINI_API_KEY
+        self.model = model or GEMINI_MODEL
+
+        if not self.api_key:
+            raise ValueError(
+                "GEMINI_API_KEY is not configured."
+            )
+
+        self.client = genai.Client(api_key=self.api_key)
+
+    def evaluate_criterion(
+        self,
+        criterion_evidence: dict[str, Any],
+    ) -> CriterionEvaluation:
+        prompt = build_criterion_prompt(criterion_evidence)
+
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=[
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "text": (
+                                SYSTEM_PROMPT
+                                + "\n\n"
+                                + prompt
+                            )
+                        }
+                    ],
+                }
+            ],
+        )
+
+        text = response.text
+
+        if not text:
+            raise ValueError(
+                "Gemini returned an empty response."
+            )
+
+        data = self._parse_json(text)
+
+        return CriterionEvaluation.model_validate(data)
+
+    def evaluate(
+        self,
+        evidence_package: dict[str, Any],
+    ) -> LLMEvaluation:
+        criterion_results = []
+
+        for criterion in evidence_package.get("criterion_evidence", []):
+            result = self.evaluate_criterion(criterion)
+            criterion_results.append(result)
+
+        return LLMEvaluation(
+            criterion_results=criterion_results,
+            model=self.model,
+            overall_notes=[],
+        )
+
+    @staticmethod
+    def _parse_json(text: str) -> dict[str, Any]:
+        cleaned = text.strip()
+
+        if cleaned.startswith("```"):
+            lines = cleaned.splitlines()
+
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+
+            cleaned = "\n".join(lines).strip()
+
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"Gemini returned invalid JSON: {exc}"
+            ) from exc
