@@ -1,23 +1,27 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any
+
+from evaluation.deterministic import CheckResult
+from evaluation.evidence_selector import select_extracted_evidence
 
 
 def get_criterion_check_ids(criterion: dict[str, Any]) -> list[str]:
     """
-    Extract all deterministic check IDs associated with a rubric criterion.
+    Return the deterministic check IDs associated with a rubric criterion.
+
+    The mapping comes directly from rubric.yaml.
 
     Example:
-        randomized_search ->
-        [
-            "randomized_search",
-            "large_search_space",
-            "randomized_search_cv",
-            "best_params",
-        ]
+        Evaluation
+        -> mae
+        -> rmse
+        -> r2
+        -> metric_interpretation
     """
 
-    check_ids = []
+    check_ids: list[str] = []
 
     for rubric_check in criterion.get("checks", []):
         check_ids.extend(rubric_check.get("checks", []))
@@ -25,19 +29,52 @@ def get_criterion_check_ids(criterion: dict[str, Any]) -> list[str]:
     return check_ids
 
 
+def normalize_check_results(
+    deterministic_results: dict[str, CheckResult]
+    | list[CheckResult],
+) -> list[dict[str, Any]]:
+    """
+    Convert deterministic CheckResult objects into JSON-friendly dictionaries.
+
+    This creates the representation that can later be passed to an LLM.
+    """
+
+    if isinstance(deterministic_results, dict):
+        results = deterministic_results.values()
+    else:
+        results = deterministic_results
+
+    normalized = []
+
+    for result in results:
+        if isinstance(result, CheckResult):
+            normalized.append(asdict(result))
+        elif isinstance(result, dict):
+            normalized.append(result)
+        else:
+            raise TypeError(
+                f"Unsupported deterministic result type: {type(result)}"
+            )
+
+    return normalized
+
+
 def build_evidence_package(
     student_name: str,
     assignment: dict[str, Any],
     rubric: list[dict[str, Any]],
     extracted_content: dict[str, Any],
-    deterministic_results: list[dict[str, Any]],
+    deterministic_results: dict[str, CheckResult]
+    | list[CheckResult],
 ) -> dict[str, Any]:
     """
-    Build the complete evidence package.
+    Build the complete internal evidence package.
 
-    This package is used internally by the evaluation pipeline.
-    Individual LLM calls should normally receive criterion-specific
-    evidence rather than the entire package.
+    This package contains all available evidence.
+
+    Individual LLM requests should normally use
+    build_criterion_evidence() instead of sending this
+    entire package.
     """
 
     return {
@@ -46,29 +83,38 @@ def build_evidence_package(
         },
         "assignment": assignment,
         "rubric": rubric,
-        "deterministic_results": deterministic_results,
+        "deterministic_results": normalize_check_results(
+            deterministic_results
+        ),
         "extracted_content": extracted_content,
     }
 
 
 def build_criterion_evidence(
     criterion: dict[str, Any],
-    deterministic_results: list[dict[str, Any]],
+    deterministic_results: dict[str, CheckResult]
+    | list[CheckResult],
     extracted_content: dict[str, Any],
 ) -> dict[str, Any]:
     """
-    Build evidence for a single rubric criterion.
+    Build evidence specifically for one rubric criterion.
 
-    Only deterministic results related to the criterion's configured
-    checks are included.
+    Only deterministic checks configured for that criterion
+    are included.
     """
 
-    required_check_ids = get_criterion_check_ids(criterion)
+    required_check_ids = set(
+        get_criterion_check_ids(criterion)
+    )
+
+    normalized_results = normalize_check_results(
+        deterministic_results
+    )
 
     relevant_results = [
         result
-        for result in deterministic_results
-        if result.get("check") in required_check_ids
+        for result in normalized_results
+        if result.get("check_id") in required_check_ids
     ]
 
     return {
@@ -79,17 +125,22 @@ def build_criterion_evidence(
             "checks": criterion.get("checks", []),
         },
         "deterministic_evidence": relevant_results,
-        "extracted_content": extracted_content,
+        "submission_evidence": select_extracted_evidence(
+            criterion=criterion,
+            extracted_content=extracted_content,
+        ),
     }
 
 
 def build_all_criterion_evidence(
     rubric: list[dict[str, Any]],
-    deterministic_results: list[dict[str, Any]],
+    deterministic_results: dict[str, CheckResult]
+    | list[CheckResult],
     extracted_content: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """
-    Build a separate evidence package for every rubric criterion.
+    Build one criterion-specific evidence package for every
+    rubric criterion.
     """
 
     return [

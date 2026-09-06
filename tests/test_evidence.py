@@ -1,8 +1,10 @@
+from evaluation.deterministic import CheckResult
 from evaluation.evidence import (
     build_all_criterion_evidence,
     build_criterion_evidence,
     build_evidence_package,
     get_criterion_check_ids,
+    normalize_check_results,
 )
 from llm.mock import MockLLMEvaluator
 
@@ -33,6 +35,38 @@ def test_get_criterion_check_ids():
     assert check_ids == ["mae", "rmse", "r2"]
 
 
+def test_normalize_check_results():
+    results = {
+        "mae": CheckResult(
+            check_id="mae",
+            passed=True,
+            evidence="Found MAE.",
+            confidence="high",
+        ),
+        "rmse": CheckResult(
+            check_id="rmse",
+            passed=False,
+            evidence="RMSE not detected.",
+            confidence="medium",
+        ),
+    }
+
+    normalized = normalize_check_results(results)
+
+    assert len(normalized) == 2
+    assert normalized[0]["check_id"] in {"mae", "rmse"}
+
+    mae_result = next(
+        result
+        for result in normalized
+        if result["check_id"] == "mae"
+    )
+
+    assert mae_result["passed"] is True
+    assert mae_result["evidence"] == "Found MAE."
+    assert mae_result["confidence"] == "high"
+
+
 def test_build_criterion_evidence_filters_checks():
     criterion = {
         "id": "evaluation",
@@ -50,20 +84,26 @@ def test_build_criterion_evidence_filters_checks():
         ],
     }
 
-    deterministic_results = [
-        {
-            "check": "mae",
-            "passed": True,
-        },
-        {
-            "check": "rmse",
-            "passed": True,
-        },
-        {
-            "check": "r2",
-            "passed": True,
-        },
-    ]
+    deterministic_results = {
+        "mae": CheckResult(
+            "mae",
+            True,
+            "Found MAE.",
+            "high",
+        ),
+        "rmse": CheckResult(
+            "rmse",
+            True,
+            "Found RMSE.",
+            "medium",
+        ),
+        "r2": CheckResult(
+            "r2",
+            True,
+            "Found R².",
+            "medium",
+        ),
+    }
 
     evidence = build_criterion_evidence(
         criterion=criterion,
@@ -74,7 +114,7 @@ def test_build_criterion_evidence_filters_checks():
     assert len(evidence["deterministic_evidence"]) == 2
 
     returned_checks = {
-        result["check"]
+        result["check_id"]
         for result in evidence["deterministic_evidence"]
     }
 
@@ -107,16 +147,18 @@ def test_build_all_criterion_evidence():
         },
     ]
 
-    deterministic_results = [
-        {
-            "check": "mae",
-            "passed": True,
-        },
-        {
-            "check": "cross_validation",
-            "passed": True,
-        },
-    ]
+    deterministic_results = {
+        "mae": CheckResult(
+            "mae",
+            True,
+            "Found MAE.",
+        ),
+        "cross_validation": CheckResult(
+            "cross_validation",
+            True,
+            "Found CV.",
+        ),
+    }
 
     results = build_all_criterion_evidence(
         rubric=rubric,
@@ -127,12 +169,12 @@ def test_build_all_criterion_evidence():
     assert len(results) == 2
 
     assert (
-        results[0]["deterministic_evidence"][0]["check"]
+        results[0]["deterministic_evidence"][0]["check_id"]
         == "mae"
     )
 
     assert (
-        results[1]["deterministic_evidence"][0]["check"]
+        results[1]["deterministic_evidence"][0]["check_id"]
         == "cross_validation"
     )
 
@@ -144,16 +186,14 @@ def test_build_evidence_package():
         "total_marks": 25,
     }
 
-    rubric = []
-
     package = build_evidence_package(
         student_name="Demo Student",
         assignment=assignment,
-        rubric=rubric,
+        rubric=[],
         extracted_content={
             "python": "example code"
         },
-        deterministic_results=[],
+        deterministic_results={},
     )
 
     assert package["student"]["name"] == "Demo Student"
