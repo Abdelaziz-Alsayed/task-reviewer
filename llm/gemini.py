@@ -60,6 +60,15 @@ class GeminiEvaluator(LLMEvaluator):
 
         data = self._parse_json(text)
 
+        expected_id = criterion_evidence["criterion"]["id"]
+
+        if data.get("criterion_id") != expected_id:
+            raise ValueError(
+                "Gemini returned an unexpected criterion_id: "
+                f"{data.get('criterion_id')!r}; "
+                f"expected {expected_id!r}"
+            )
+
         return CriterionEvaluation.model_validate(data)
 
     def evaluate(
