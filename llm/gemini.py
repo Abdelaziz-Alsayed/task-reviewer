@@ -7,7 +7,11 @@ from google import genai
 
 from config.llm_settings import GEMINI_API_KEY, GEMINI_MODEL
 from llm.base import LLMEvaluator
-from llm.prompts import SYSTEM_PROMPT, build_criterion_prompt
+from llm.prompts import (
+    SYSTEM_PROMPT,
+    build_criterion_prompt,
+    build_full_evaluation_prompt,
+)
 from llm.schemas import CriterionEvaluation, LLMEvaluation
 
 
@@ -75,16 +79,22 @@ class GeminiEvaluator(LLMEvaluator):
         self,
         evidence_package: dict[str, Any],
     ) -> LLMEvaluation:
-        criterion_results = []
+        prompt = build_full_evaluation_prompt(evidence_package)
 
-        for criterion in evidence_package.get("criterion_evidence", []):
-            result = self.evaluate_criterion(criterion)
-            criterion_results.append(result)
-
-        return LLMEvaluation(
-            criterion_results=criterion_results,
+        response = self.client.models.generate_content(
             model=self.model,
-            overall_notes=[],
+            contents=[
+                SYSTEM_PROMPT,
+                prompt,
+            ],
+        )
+
+        data = self._parse_json(response.text)
+        
+        result = LLMEvaluation.model_validate(data)
+
+        return result.model_copy(
+            update={"model": self.model}
         )
 
     @staticmethod

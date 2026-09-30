@@ -75,3 +75,65 @@ Important:
 - Do not calculate the overall assignment score.
 - Return ONLY valid JSON.
 """
+
+def build_full_evaluation_prompt(
+        evidence_package: dict,
+    ) -> str:
+        return f"""
+    Evaluate the student's entire assignment using the supplied
+    rubric and evidence.
+    
+    RUBRIC AND EVIDENCE
+    -------------------
+    
+    {json.dumps(evidence_package, indent=2, ensure_ascii=False)}
+    
+    Evaluate EVERY rubric criterion.
+    
+    For each criterion:
+    
+    - assign a score supported by the evidence,
+    - provide concise evidence,
+    - identify missing requirements,
+    - explain the reasoning,
+    - provide a confidence value from 0 to 1.
+    
+    Important rules:
+    
+    - Use ONLY the supplied rubric and evidence.
+    - Do not invent implementation details.
+    - Do not assume something was done if the evidence does not support it.
+    - Do not award marks for unsupported requirements.
+    - The score must be between 0 and the criterion maximum.
+    - Use the exact criterion IDs supplied by the rubric.
+    - Use the exact maximum score supplied by the rubric.
+    - Return one result for EVERY criterion.
+    - Do not calculate the overall assignment score.
+    - The application will calculate the total score separately.
+    - The instructor remains the final authority.
+    
+    Return ONLY valid JSON.
+    
+    Use exactly this structure:
+
+    {{
+        "criterion_results": [
+        {{
+            "criterion_id": "string",
+            "criterion_name": "string",
+            "score": 0,
+            "max_score": 0,
+            "evidence": [
+             "string"
+            ],
+            "missing_requirements": [
+                "string"
+            ],
+            "reasoning": "string",
+            "confidence": 0.0
+        }}
+    ],
+    "model": "string",
+    "overall_notes": []
+    }}
+    """

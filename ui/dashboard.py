@@ -1,13 +1,20 @@
 import streamlit as st
 import pandas as pd
+import json
+import time
 
-from config.settings import DB_PATH, SUBMISSIONS_DIR
+from config.rubric import load_rubric
+from config.settings import DB_PATH, RUBRIC_PATH, SUBMISSIONS_DIR
 from database.db import get_evaluation, init_db, list_evaluations
+from database.db import save_human_review
+from evaluation.history import (
+    get_evaluation_details,
+    get_evaluation_history,
+)
 from export.reports import export_summary_csv
 from ingestion.local import discover_submissions, list_submission_files
-from extraction.extractor import extract_submission
-from evaluation.scoring import evaluate
-from config.rubric import load_rubric
+from evaluation.runner import run_evaluation
+from llm.factory import create_llm_evaluator
 
 
 def render_dashboard(rubric):
@@ -33,51 +40,426 @@ def render_dashboard(rubric):
 
 def render_submissions(rubric):
     st.header("Submissions")
+    provider = st.radio(
+        "LLM Provider",
+        ["Mock", "Gemini"],
+        horizontal=True,
+        help=(
+            "Mock runs locally without using an LLM API. "
+            "Gemini performs a real AI evaluation."
+        ),
+    )
+    provider_key = provider.lower()
+
     submissions = discover_submissions(SUBMISSIONS_DIR)
+    evaluations = {
+                    row["name"]: dict(row)
+                    for row in list_evaluations(DB_PATH)
+                }
     if not submissions:
         st.info(f"Add one student folder under `{SUBMISSIONS_DIR}`.")
         return
+    
+    evaluations = {
+        row["name"]: dict(row)
+        for row in list_evaluations(DB_PATH)
+    }
+
     for submission in submissions:
         with st.container(border=True):
             st.subheader(submission.student_name)
+
             files = list_submission_files(submission)
-            st.write(f"{len(files)} supported file(s)")
-            st.code("\n".join(str(p.relative_to(submission.path)) for p in files), language="text")
-            if st.button("Evaluate", key=f"eval-{submission.student_name}"):
-                extracted = extract_submission(submission.path)
-                result = evaluate(extracted, rubric)
-                from database.db import save_evaluation
-                save_evaluation(DB_PATH, submission.student_name, str(submission.path), rubric["assignment"]["id"], result)
-                st.success(f"Deterministic evaluation saved: {result['score']} / {result['max_score']}")
-                st.rerun()
+
+            st.write(
+                f"{len(files)} supported file(s)"
+            )
+
+            st.code(
+                "\n".join(
+                    str(p.relative_to(submission.path))
+                    for p in files
+                ),
+                language="text",
+            )
+
+            existing_evaluation = evaluations.get(
+                submission.student_name
+            )
+
+            if existing_evaluation:
+                st.info(
+                    "Already evaluated — "
+                    f"{existing_evaluation['status'].capitalize()}"
+                )
+
+                button_label = "Re-evaluate"
+                button_key = (
+                    f"reeval-{submission.student_name}"
+                )
+            else:
+                button_label = "Evaluate"
+                button_key = (
+                    f"eval-{submission.student_name}"
+                )
+
+            if st.button(
+                button_label,
+                key=button_key,
+            ):
+                llm_evaluator = create_llm_evaluator(
+                    provider_key
+                )
+
+                action = (
+                    "Re-evaluating"
+                    if existing_evaluation
+                    else "Evaluating"
+                )
+
+                try:
+                    with st.spinner(
+                        f"{action} "
+                        f"{submission.student_name}..."
+                    ):
+                        result = run_evaluation(
+                            submission_path=submission.path,
+                            student_name=submission.student_name,
+                            assignment=rubric["assignment"],
+                            rubric=rubric["criteria"],
+                            llm_evaluator=llm_evaluator,
+                            db_path=DB_PATH,
+                        )
+
+                except Exception as exc:
+                    st.error(
+                        "The evaluation could not be completed."
+                    )
+
+                    st.caption(
+                        f"Error details: {exc}"
+                    )
+
+                else:
+                    st.success(
+                        "AI evaluation completed: "
+                        f"{result.ai_suggested_score.total_score:.1f} / "
+                        f"{result.ai_suggested_score.total_marks:.1f}"
+                    )
+
+                    time.sleep(3)
+                    st.rerun()
 
 
 def render_evaluation():
     st.header("Evaluation Review")
-    rows = [dict(r) for r in list_evaluations(DB_PATH)]
+
+    rows = [dict(row) for row in list_evaluations(DB_PATH)]
+
     if not rows:
         st.info("No evaluations available.")
         return
-    labels = {r["id"]: f"{r['name']} — {r['ai_score']:.1f}/{r['max_score']}" for r in rows}
-    selected = st.selectbox("Student", list(labels), format_func=lambda x: labels[x])
-    evaluation, criteria = get_evaluation(DB_PATH, selected)
+
+    labels = {
+        row["id"]: (
+            f"{row['name']} — "
+            f"{row['ai_score']:.1f}/{row['max_score']}"
+        )
+        for row in rows
+    }
+
+    selected = st.selectbox(
+        "Student",
+        list(labels),
+        format_func=lambda evaluation_id: labels[evaluation_id],
+    )
+
+    evaluation, criteria = get_evaluation(
+        DB_PATH,
+        selected,
+    )
+
+    if evaluation is None:
+        st.error("Evaluation not found.")
+        return
+
     st.subheader(evaluation["name"])
-    st.metric("Deterministic suggested score", f"{evaluation['ai_score']:.1f} / {evaluation['max_score']}")
-    for criterion in criteria:
-        st.markdown(f"**{criterion['criterion']} — {criterion['ai_score']:.1f} / {criterion['max_score']}**")
-        import json
-        for evidence in json.loads(criterion["evidence"]):
-            icon = "✓" if evidence["passed"] else "✗"
-            st.write(f"{icon} {evidence['evidence']}")
+
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric(
+        "AI Suggested Score",
+        f"{evaluation['ai_score']:.1f} / {evaluation['max_score']}",
+    )
+
+    if evaluation["final_score"] is not None:
+        col2.metric(
+            "Final Score",
+            f"{evaluation['final_score']:.1f} / "
+            f"{evaluation['max_score']}",
+        )
+    else:
+        col2.metric(
+            "Final Score",
+            "Not reviewed",
+        )
+
+    col3.metric(
+        "Status",
+        evaluation["status"].capitalize(),
+    )
+
     st.divider()
-    final = st.number_input("Final score", min_value=0.0, max_value=float(evaluation["max_score"]), value=float(evaluation["final_score"] if evaluation["final_score"] is not None else evaluation["ai_score"]), step=0.5)
-    if st.button("Save final score"):
-        with __import__("sqlite3").connect(DB_PATH) as conn:
-            conn.execute("UPDATE evaluations SET final_score=?, status='reviewed' WHERE id=?", (final, selected))
-            conn.commit()
-        st.success("Final score saved.")
+
+    st.subheader("Criterion Review")
+
+    criterion_scores = {}
+
+    for criterion in criteria:
+        criterion_id = criterion["criterion"]
+        max_score = float(criterion["max_score"])
+        ai_score = float(criterion["ai_score"])
+
+        st.markdown(
+            f"### {criterion_id}"
+        )
+
+        col1, col2 = st.columns([1, 2])
+
+        with col1:
+            st.write(
+                f"**AI Score:** "
+                f"{ai_score:.1f} / {max_score}"
+            )
+
+            if criterion["confidence"] is not None:
+                st.write(
+                    f"**Confidence:** "
+                    f"{float(criterion['confidence']):.0%}"
+                )
+
+        with col2:
+            existing_final = criterion["final_score"]
+
+            default_score = (
+                float(existing_final)
+                if existing_final is not None
+                else ai_score
+            )
+
+            final_score = st.number_input(
+                "Final criterion score",
+                min_value=0.0,
+                max_value=max_score,
+                value=default_score,
+                step=0.5,
+                key=f"final-score-{selected}-{criterion_id}",
+            )
+
+            criterion_scores[criterion_id] = final_score
+
+        if criterion["evidence"]:
+            st.markdown("**AI Evidence**")
+
+            evidence = json.loads(
+                criterion["evidence"]
+            )
+
+            for item in evidence:
+                st.write(f"- {item}")
+
+        if criterion["missing_requirements"]:
+            st.markdown("**Missing Requirements**")
+
+            missing = json.loads(
+                criterion["missing_requirements"]
+            )
+
+            for item in missing:
+                st.write(f"- {item}")
+
+        if criterion["reasoning"]:
+            st.markdown("**AI Reasoning**")
+            st.write(criterion["reasoning"])
+
+        st.divider()
+
+    calculated_total = sum(
+        criterion_scores.values()
+    )
+
+    st.subheader("Final Review")
+
+    st.metric(
+        "Calculated Final Score",
+        f"{calculated_total:.1f} / "
+        f"{evaluation['max_score']}",
+    )
+
+    feedback = st.text_area(
+        "Instructor Feedback",
+        value=evaluation["feedback"] or "",
+        placeholder="Add feedback for the student...",
+    )
+
+    if st.button(
+        "Save Human Review",
+        type="primary",
+    ):
+        save_human_review(
+            path=DB_PATH,
+            evaluation_id=selected,
+            criterion_scores=criterion_scores,
+            final_score=calculated_total,
+            feedback=feedback,
+        )
+
+        st.success(
+            "Human review saved successfully."
+        )
+
+        time.sleep(3)
+
         st.rerun()
 
+def render_history():
+    st.header("Evaluation History")
+
+    history = get_evaluation_history(DB_PATH)
+
+    if not history:
+        st.info("No evaluations available.")
+        return
+
+    df = pd.DataFrame(history)
+
+    display_columns = [
+        "id",
+        "name",
+        "assignment_id",
+        "status",
+        "ai_score",
+        "final_score",
+        "max_score",
+        "evaluated_at",
+    ]
+
+    st.dataframe(
+        df[display_columns],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.divider()
+
+    evaluation_ids = [row["id"] for row in history]
+
+    labels = {
+        row["id"]: (
+            f"{row['name']} — "
+            f"{row['ai_score']:.1f}/{row['max_score']}"
+        )
+        for row in history
+    }
+
+    selected = st.selectbox(
+        "View evaluation",
+        evaluation_ids,
+        format_func=lambda evaluation_id: labels[evaluation_id],
+    )
+
+    evaluation, criteria = get_evaluation_details(
+        DB_PATH,
+        selected,
+    )
+
+    if evaluation is None:
+        st.error("Evaluation not found.")
+        return
+
+    st.subheader(evaluation["name"])
+
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric(
+        "AI Suggested Score",
+        f"{evaluation['ai_score']:.1f} / {evaluation['max_score']}",
+    )
+
+    final_score = evaluation["final_score"]
+
+    col2.metric(
+        "Final Score",
+        (
+            f"{final_score:.1f} / {evaluation['max_score']}"
+            if final_score is not None
+            else "Not reviewed"
+        ),
+    )
+
+    col3.metric(
+        "Status",
+        evaluation["status"].capitalize(),
+    )
+
+    st.caption(
+        f"Assignment: {evaluation['assignment_id']}"
+    )
+
+    st.caption(
+        f"Evaluated at: {evaluation['evaluated_at']}"
+    )
+
+    st.divider()
+
+    st.subheader("Criterion Results")
+
+    for criterion in criteria:
+        st.markdown(
+            f"### {criterion['criterion']}"
+        )
+
+        st.write(
+            f"**AI Score:** "
+            f"{criterion['ai_score']:.1f} / "
+            f"{criterion['max_score']}"
+        )
+
+        if criterion["confidence"] is not None:
+            st.write(
+                f"**Confidence:** "
+                f"{criterion['confidence']:.0%}"
+            )
+
+        if criterion["evidence"]:
+            st.write("**Evidence**")
+
+            import json
+
+            evidence = json.loads(
+                criterion["evidence"]
+            )
+
+            for item in evidence:
+                st.write(f"- {item}")
+
+        if criterion["missing_requirements"]:
+            st.write("**Missing Requirements**")
+
+            import json
+
+            missing = json.loads(
+                criterion["missing_requirements"]
+            )
+
+            for item in missing:
+                st.write(f"- {item}")
+
+        if criterion["reasoning"]:
+            st.write("**Reasoning**")
+            st.write(criterion["reasoning"])
+
+        st.divider()
 
 def render_export():
     st.header("Export")
@@ -88,14 +470,32 @@ def render_export():
 
 
 def run():
-    rubric = load_rubric(__import__("config.settings", fromlist=["RUBRIC_PATH"]).RUBRIC_PATH)
+    rubric = load_rubric(RUBRIC_PATH)
+
     init_db(DB_PATH)
-    page = st.sidebar.radio("Page", ["Dashboard", "Submissions", "Evaluation", "Export"])
+
+    page = st.sidebar.radio(
+        "Page",
+        [
+            "Dashboard",
+            "Submissions",
+            "Evaluation",
+            "History",
+            "Export",
+        ],
+    )
+
     if page == "Dashboard":
         render_dashboard(rubric)
+
     elif page == "Submissions":
         render_submissions(rubric)
+
     elif page == "Evaluation":
         render_evaluation()
+
+    elif page == "History":
+        render_history()
+
     else:
         render_export()

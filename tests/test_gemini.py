@@ -132,3 +132,62 @@ def test_unexpected_criterion_id_is_rejected(monkeypatch):
 
     with pytest.raises(ValueError, match="unexpected criterion_id"):
         evaluator.evaluate_criterion(criterion_evidence)
+
+
+def test_evaluate_uses_configured_model(monkeypatch):
+    evaluator = object.__new__(GeminiEvaluator)
+
+    evaluator.model = "gemini-2.5-flash"
+
+    class FakeResponse:
+        text = """
+        {
+            "criterion_results": [
+                {
+                    "criterion_id": "mae",
+                    "criterion_name": "MAE",
+                    "score": 1,
+                    "max_score": 1,
+                    "evidence": [
+                        "MAE was detected."
+                    ],
+                    "missing_requirements": [],
+                    "reasoning": "The requirement is supported by the evidence.",
+                    "confidence": 0.95
+                }
+            ],
+            "model": "fake_llm_generated_name",
+            "overall_notes": []
+        }
+        """
+
+    class FakeModels:
+        def generate_content(self, **kwargs):
+            return FakeResponse()
+
+    class FakeClient:
+        models = FakeModels()
+
+    evaluator.client = FakeClient()
+
+    evidence_package = {
+        "student_name": "Test Student",
+        "assignment": {
+            "id": "week05_regression",
+            "name": "Week 05 - Regression",
+            "total_marks": 25,
+        },
+        "rubric": [
+            {
+                "id": "mae",
+                "name": "MAE",
+                "max_score": 1,
+                "checks": [],
+            }
+        ],
+        "criterion_evidence": [],
+    }
+
+    result = evaluator.evaluate(evidence_package)
+
+    assert result.model == "gemini-2.5-flash"
